@@ -1,11 +1,10 @@
-import { SfPowerKit } from "../../../sfpowerkit";
-import MetadataFiles from "../../../shared/metadataFiles";
+import { SFPowerkit, LoggerLevel } from "../../../sfpowerkit";
+import MetadataFiles from "../../metadata/metadataFiles";
 import * as fs from "fs";
 import * as path from "path";
 import xml2js = require("xml2js");
-import { METADATA_INFO } from "../../../shared/metadataInfo";
-import ProfileRetriever from "../../metadata/retriever/profileRetriever";
-import _ from "lodash";
+import { METADATA_INFO } from "../../metadata/metadataInfo";
+import * as _ from "lodash";
 import Profile, {
   ApplicationVisibility,
   ProfileApexClassAccess,
@@ -16,10 +15,15 @@ import Profile, {
   RecordTypeVisibility,
   ProfileTabVisibility,
   ProfileUserPermission,
-  ProfileCustomPermissions
+  ProfileCustomPermissions,
+  FlowAccess,
+  CustomMetadataTypeAccess,
+  CustomSettingAccess,
+  PermissionSetExternalDataSourceAccess
 } from "../../../impl/metadata/schema";
 import util = require("util");
 import ProfileActions from "./profileActions";
+import ProfileWriter from "../../../impl/metadata/writer/profileWriter";
 
 const unsupportedprofiles = [];
 
@@ -478,6 +482,173 @@ export default class ProfileMerge extends ProfileActions {
 
     return profileObj;
   }
+  private mergeCustomMetadataAccesses(
+    profileObj: Profile,
+    custonMetadataAccesses: CustomMetadataTypeAccess[]
+  ): Profile {
+    if (
+      profileObj.customMetadataTypeAccesses === null ||
+      profileObj.customMetadataTypeAccesses === undefined
+    ) {
+      profileObj.customMetadataTypeAccesses = [];
+    } else if (!Array.isArray(profileObj.customMetadataTypeAccesses)) {
+      profileObj.customMetadataTypeAccesses = [
+        profileObj.customMetadataTypeAccesses
+      ];
+    }
+    for (let i = 0; i < custonMetadataAccesses.length; i++) {
+      let customMetadata = custonMetadataAccesses[i];
+      let found = false;
+      for (let j = 0; j < profileObj.customMetadataTypeAccesses.length; j++) {
+        if (
+          customMetadata.name === profileObj.customMetadataTypeAccesses[j].name
+        ) {
+          profileObj.customMetadataTypeAccesses[j].enabled =
+            customMetadata.enabled;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        profileObj.customMetadataTypeAccesses.push(customMetadata);
+      }
+    }
+
+    profileObj.customMetadataTypeAccesses.sort((cm1, cm2) => {
+      let order = 0;
+      if (cm1.name < cm2.name) {
+        order = -1;
+      } else if (cm1.name > cm2.name) {
+        order = 1;
+      }
+      return order;
+    });
+
+    return profileObj;
+  }
+  private mergeCustomSettingAccesses(
+    profileObj: Profile,
+    customSettingAccesses: CustomSettingAccess[]
+  ): Profile {
+    if (
+      profileObj.customSettingAccesses === null ||
+      profileObj.customSettingAccesses === undefined
+    ) {
+      profileObj.customSettingAccesses = [];
+    } else if (!Array.isArray(profileObj.customSettingAccesses)) {
+      profileObj.customSettingAccesses = [profileObj.customSettingAccesses];
+    }
+    for (let i = 0; i < customSettingAccesses.length; i++) {
+      let customSetting = customSettingAccesses[i];
+      let found = false;
+      for (let j = 0; j < profileObj.customSettingAccesses.length; j++) {
+        if (customSetting.name === profileObj.customSettingAccesses[j].name) {
+          profileObj.customSettingAccesses[j].enabled = customSetting.enabled;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        profileObj.customSettingAccesses.push(customSetting);
+      }
+    }
+
+    profileObj.customSettingAccesses.sort((cs1, cs2) => {
+      let order = 0;
+      if (cs1.name < cs2.name) {
+        order = -1;
+      } else if (cs1.name > cs2.name) {
+        order = 1;
+      }
+      return order;
+    });
+
+    return profileObj;
+  }
+
+  private mergeFlowAccesses(
+    profileObj: Profile,
+    flowAccesses: FlowAccess[]
+  ): Profile {
+    if (
+      profileObj.flowAccesses === null ||
+      profileObj.flowAccesses === undefined
+    ) {
+      profileObj.flowAccesses = [];
+    } else if (!Array.isArray(profileObj.flowAccesses)) {
+      profileObj.flowAccesses = [profileObj.flowAccesses];
+    }
+    for (let i = 0; i < flowAccesses.length; i++) {
+      let flowAccess = flowAccesses[i];
+      let found = false;
+      for (let j = 0; j < profileObj.flowAccesses.length; j++) {
+        if (flowAccess.flow === profileObj.flowAccesses[j].flow) {
+          profileObj.flowAccesses[j].enabled = flowAccess.enabled;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        profileObj.flowAccesses.push(flowAccess);
+      }
+    }
+
+    profileObj.flowAccesses.sort((flow1, flow2) => {
+      let order = 0;
+      if (flow1.flow < flow2.flow) {
+        order = -1;
+      } else if (flow1.flow > flow2.flow) {
+        order = 1;
+      }
+      return order;
+    });
+
+    return profileObj;
+  }
+  private mergeExternalDatasourceAccesses(
+    profileObj: Profile,
+    externalDatasources: PermissionSetExternalDataSourceAccess[]
+  ): Profile {
+    if (
+      profileObj.externalDataSourceAccesses === null ||
+      profileObj.externalDataSourceAccesses === undefined
+    ) {
+      profileObj.externalDataSourceAccesses = [];
+    } else if (!Array.isArray(profileObj.externalDataSourceAccesses)) {
+      profileObj.externalDataSourceAccesses = [
+        profileObj.externalDataSourceAccesses
+      ];
+    }
+    for (let i = 0; i < externalDatasources.length; i++) {
+      let dataSource = externalDatasources[i];
+      let found = false;
+      for (let j = 0; j < profileObj.externalDataSourceAccesses.length; j++) {
+        if (
+          dataSource.externalDataSource ===
+          profileObj.externalDataSourceAccesses[j].externalDataSource
+        ) {
+          profileObj.externalDataSourceAccesses[j].enabled = dataSource.enabled;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        profileObj.externalDataSourceAccesses.push(dataSource);
+      }
+    }
+
+    profileObj.externalDataSourceAccesses.sort((ds1, ds2) => {
+      let order = 0;
+      if (ds1.externalDataSource < ds2.externalDataSource) {
+        order = -1;
+      } else if (ds1.externalDataSource > ds2.externalDataSource) {
+        order = 1;
+      }
+      return order;
+    });
+
+    return profileObj;
+  }
 
   /**
    * Merge two profile and make sure that profile 1 contains all config present in the profile 2
@@ -494,8 +665,29 @@ export default class ProfileMerge extends ProfileActions {
     if (profile2.classAccesses !== undefined) {
       this.mergeClasses(profile1, profile2.classAccesses);
     }
+    if (profile2.customMetadataTypeAccesses !== undefined) {
+      this.mergeCustomMetadataAccesses(
+        profile1,
+        profile2.customMetadataTypeAccesses
+      );
+    }
+    if (profile2.customSettingAccesses !== undefined) {
+      this.mergeCustomSettingAccesses(profile1, profile2.customSettingAccesses);
+    }
+    if (profile2.customPermissions !== undefined) {
+      this.mergeCustomPermissions(profile1, profile2.customPermissions);
+    }
+    if (profile2.externalDataSourceAccesses !== undefined) {
+      this.mergeExternalDatasourceAccesses(
+        profile1,
+        profile2.externalDataSourceAccesses
+      );
+    }
     if (profile2.fieldPermissions !== undefined) {
       this.mergeFields(profile1, profile2.fieldPermissions);
+    }
+    if (profile2.flowAccesses !== undefined) {
+      this.mergeFlowAccesses(profile1, profile2.flowAccesses);
     }
     if (profile2.layoutAssignments !== undefined) {
       this.mergeLayouts(profile1, profile2.layoutAssignments);
@@ -508,9 +700,6 @@ export default class ProfileMerge extends ProfileActions {
     }
     if (profile2.userPermissions !== undefined) {
       this.mergePermissions(profile1, profile2.userPermissions);
-    }
-    if (profile2.customPermissions !== undefined) {
-      this.mergeCustomPermissions(profile1, profile2.customPermissions);
     }
     if (profile2.recordTypeVisibilities !== undefined) {
       this.mergeRecordTypes(profile1, profile2.recordTypeVisibilities);
@@ -529,7 +718,6 @@ export default class ProfileMerge extends ProfileActions {
     } else {
       delete profile1.loginIpRanges;
     }
-
     return profile1;
   }
 
@@ -543,7 +731,12 @@ export default class ProfileMerge extends ProfileActions {
     deleted: string[];
     updated: string[];
   }> {
-    if (this.debugFlag) SfPowerKit.ux.log("Merging profiles...");
+    SFPowerkit.log("Merging profiles...", LoggerLevel.DEBUG);
+
+    let fetchNewProfiles = _.isNil(srcFolders) || srcFolders.length === 0;
+    if (fetchNewProfiles) {
+      srcFolders = await SFPowerkit.getProjectDirectories();
+    }
     this.metadataFiles = new MetadataFiles();
     for (let i = 0; i < srcFolders.length; i++) {
       let srcFolder = srcFolders[i];
@@ -554,7 +747,12 @@ export default class ProfileMerge extends ProfileActions {
     let profileNames: string[] = [];
     var profilePathAssoc = {};
     let profileStatus = await this.getProfileFullNamesWithLocalStatus(profiles);
-    let metadataFiles = _.union(profileStatus.added, profileStatus.updated);
+    let metadataFiles = profileStatus.updated || [];
+    if (fetchNewProfiles) {
+      metadataFiles = _.union(profileStatus.added, profileStatus.updated);
+    } else {
+      profileStatus.added = [];
+    }
     metadataFiles.sort();
     for (var i = 0; i < metadataFiles.length; i++) {
       var profileComponent = metadataFiles[i];
@@ -574,15 +772,19 @@ export default class ProfileMerge extends ProfileActions {
       j: number,
       chunk: number = 10;
     var temparray;
-    SfPowerKit.ux.log(
-      `${profileNames.length}  profiles found in the directory `
+    SFPowerkit.log(
+      `${profileNames.length}  profiles found in the directory `,
+      LoggerLevel.DEBUG
     );
     for (i = 0, j = profileNames.length; i < j; i += chunk) {
       temparray = profileNames.slice(i, i + chunk);
       //SfPowerKit.ux.log(temparray.length);
       let start = i + 1;
       let end = i + chunk;
-      SfPowerKit.ux.log("Loading a chunk of profiles " + start + " to " + end);
+      SFPowerkit.log(
+        "Loading a chunk of profiles " + start + " to " + end,
+        LoggerLevel.INFO
+      );
       let profileList: string[] = [];
       var metadataList = await this.profileRetriever.loadProfiles(
         temparray,
@@ -603,30 +805,36 @@ export default class ProfileMerge extends ProfileActions {
         //Check if the component exists in the file system
         let filePath = profilePathAssoc[profileObjFromServer.fullName];
         var profileObj: Profile = profileObjFromServer;
+        let profileWriter = new ProfileWriter();
 
         var exists = fs.existsSync(filePath);
         if (exists) {
-          if (this.debugFlag)
-            SfPowerKit.ux.log(
-              "Merging profile " + profileObjFromServer.fullName
-            );
+          SFPowerkit.log(
+            "Merging profile " + profileObjFromServer.fullName,
+            LoggerLevel.DEBUG
+          );
           var profileXml = fs.readFileSync(filePath);
 
           const parser = new xml2js.Parser({ explicitArray: false });
           const parseString = util.promisify(parser.parseString);
           let parseResult = await parseString(profileXml);
 
-          profileObj = ProfileRetriever.toProfile(parseResult.Profile);
+          profileObj = profileWriter.toProfile(parseResult.Profile);
           await this.mergeProfile(profileObj, profileObjFromServer);
         } else {
-          if (this.debugFlag)
-            SfPowerKit.ux.log("New Profile " + profileObjFromServer.fullName);
+          SFPowerkit.log(
+            "New Profile found in server " + profileObjFromServer.fullName,
+            LoggerLevel.DEBUG
+          );
         }
 
-        await this.profileRetriever.writeProfile(profileObj, filePath);
+        profileObj.fullName = profileObjFromServer.fullName;
+        profileWriter.writeProfile(profileObj, filePath);
 
-        if (this.debugFlag)
-          SfPowerKit.ux.log("Profile " + profileObj.fullName + " merged");
+        SFPowerkit.log(
+          "Profile " + profileObj.fullName + " merged",
+          LoggerLevel.DEBUG
+        );
         profileList.push(profileObj.fullName);
       }
       profileListToReturn.push(...profileList);

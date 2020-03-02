@@ -62,6 +62,9 @@ export interface MetadataInfo {
   ApexPage?: MetadataDescribe;
   CustomField?: MetadataDescribe;
   CustomObject?: MetadataDescribe;
+  CustomPermission?: MetadataDescribe;
+  ExternalDataSource?: MetadataDescribe;
+  Flow?: MetadataDescribe;
   RecordType?: MetadataDescribe;
   ListView?: MetadataDescribe;
   WebLink?: MetadataDescribe;
@@ -84,23 +87,27 @@ export interface MetadataInfo {
   Dashboard?: MetadataDescribe;
   EmailTemplate?: MetadataDescribe;
   CustomSite?: MetadataDescribe;
-  Permissionset?: MetadataDescribe;
+  PermissionSet?: MetadataDescribe;
   StaticResource?: MetadataDescribe;
   CustomObjectTranslation?: MetadataDescribe;
   AuraDefinitionBundle?: MetadataDescribe;
+  Workflow?: MetadataDescribe;
+  SharingRules?: MetadataDescribe;
+  LightningComponentBundle?: MetadataDescribe;
 }
 
-export class MetadataInfoUtils {
+export class MetadataInfo {
   static loadMetadataInfo(): MetadataInfo {
     let metadataInfo: MetadataInfo = {};
-    let resourcePAth = path.join(
+    let resourcePath = path.join(
       __dirname,
+      "..",
       "..",
       "..",
       "resources",
       "metadatainfo.json"
     );
-    const fileData = fs.readFileSync(resourcePAth, "utf8");
+    const fileData = fs.readFileSync(resourcePath, "utf8");
     let metadataInfoJSON = JSON.parse(fileData);
     metadataInfoJSON.metadataObjects.forEach(metadata => {
       let metadataDescribe = metadata as MetadataDescribe;
@@ -145,7 +152,10 @@ export class MetadataInfoUtils {
     return metadataInfo;
   }
 
-  static getMetadataName(metadataFile: string): string {
+  static getMetadataName(
+    metadataFile: string,
+    validateSourceExtension = true
+  ): string {
     let matcher = metadataFile.match(SOURCE_EXTENSION_REGEX);
     let extension = "";
     if (matcher) {
@@ -155,19 +165,60 @@ export class MetadataInfoUtils {
     }
     //SfPowerKit.ux.log(extension);
     let metadataName = "";
-    let keys = Object.keys(METADATA_INFO);
-    for (let i = 0; i < keys.length; i++) {
-      let metaDescribe = METADATA_INFO[keys[i]];
-      if (
-        metaDescribe.sourceExtension === extension ||
-        metaDescribe.folderExtension === extension
-      ) {
-        metadataName = metaDescribe.xmlName;
-        break;
+
+    const auraRegExp = new RegExp("aura");
+    const lwcRegExp = new RegExp("lwc");
+    const staticResourceRegExp = new RegExp("staticresources");
+    const documentRegExp = new RegExp("documents");
+    if (
+      auraRegExp.test(metadataFile) &&
+      (SOURCE_EXTENSION_REGEX.test(metadataFile) || !validateSourceExtension)
+    ) {
+      metadataName = METADATA_INFO.AuraDefinitionBundle.xmlName;
+    } else if (
+      lwcRegExp.test(metadataFile) &&
+      (SOURCE_EXTENSION_REGEX.test(metadataFile) || !validateSourceExtension)
+    ) {
+      metadataName = METADATA_INFO.LightningComponentBundle.xmlName;
+    } else if (
+      staticResourceRegExp.test(metadataFile) &&
+      (SOURCE_EXTENSION_REGEX.test(metadataFile) || !validateSourceExtension)
+    ) {
+      metadataName = METADATA_INFO.StaticResource.xmlName;
+    } else if (
+      documentRegExp.test(metadataFile) &&
+      (SOURCE_EXTENSION_REGEX.test(metadataFile) || !validateSourceExtension)
+    ) {
+      metadataName = METADATA_INFO.Document.xmlName;
+    } else {
+      let keys = Object.keys(METADATA_INFO);
+      for (let i = 0; i < keys.length; i++) {
+        let metaDescribe = METADATA_INFO[keys[i]];
+        if (
+          metaDescribe.sourceExtension === extension ||
+          ("." + metaDescribe.suffix === extension &&
+            !validateSourceExtension) ||
+          metaDescribe.folderExtension === extension
+        ) {
+          metadataName = metaDescribe.xmlName;
+          break;
+        }
       }
     }
     return metadataName;
   }
 }
 
-export const METADATA_INFO = MetadataInfoUtils.loadMetadataInfo();
+export const METADATA_INFO = MetadataInfo.loadMetadataInfo();
+export const UNSPLITED_METADATA = [
+  METADATA_INFO.Workflow,
+  METADATA_INFO.SharingRules,
+  METADATA_INFO.CustomLabels,
+  METADATA_INFO.Profile,
+  METADATA_INFO.PermissionSet
+];
+
+export const PROFILE_PERMISSIONSET_EXTENSION = [
+  METADATA_INFO.Profile,
+  METADATA_INFO.PermissionSet
+];

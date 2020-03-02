@@ -1,11 +1,11 @@
-import { SfPowerKit } from "../sfpowerkit";
+import { SFPowerkit, LoggerLevel } from "../sfpowerkit";
 
 const fs = require("fs");
 const path = require("path");
 const _ = require("lodash");
 const os = require("os");
 
-export const PLUGIN_CACHE_FOLDER = os.homedir() + path.sep + "sfpowerkit";
+export const PLUGIN_CACHE_FOLDER = "sfpowerkit";
 
 export default class FileUtils {
   /**
@@ -24,7 +24,7 @@ export default class FileUtils {
     });
   }
   /**
-   * Load all files from the given folder with the givet extension
+   * Load all files from the given folder with the given extension
    * @param folder the folder from which files wille be loaded
    * @param extension File extension to load.
    */
@@ -36,7 +36,7 @@ export default class FileUtils {
     let pathExists = fs.existsSync(folder);
     let folderName = path.basename(folder);
     if (!pathExists) {
-      SfPowerKit.ux.log("Folder not exists: " + folderName);
+      SFPowerkit.log("Folder not exists: " + folderName, LoggerLevel.ERROR);
       return result;
     }
     let content: string[] = fs.readdirSync(folder);
@@ -44,7 +44,10 @@ export default class FileUtils {
       let curFile = path.join(folder, file);
       let stats = fs.statSync(curFile);
       if (stats.isFile()) {
-        if (extension.indexOf(path.extname(curFile)) != -1) {
+        if (
+          extension.indexOf(path.extname(curFile)) != -1 ||
+          extension === ""
+        ) {
           result.push(curFile);
         }
       } else if (stats.isDirectory()) {
@@ -54,6 +57,21 @@ export default class FileUtils {
     });
     return result;
   }
+
+  public static getGlobalCacheDir() {
+    let homedir = os.homedir();
+    let configDir = homedir + path.sep + PLUGIN_CACHE_FOLDER;
+    if (!fs.existsSync(configDir)) {
+      SFPowerkit.log(
+        "Config folder does not exists, Creating Folder",
+        LoggerLevel.INFO
+      );
+      fs.mkdirSync(configDir);
+    }
+
+    return configDir;
+  }
+
   /**
    * Get the cache path for the given cache file name
    * @param fileName
@@ -62,7 +80,10 @@ export default class FileUtils {
     let homedir = os.homedir();
     let configDir = homedir + path.sep + PLUGIN_CACHE_FOLDER;
     if (!fs.existsSync(configDir)) {
-      SfPowerKit.ux.log("Config folder does not exists");
+      SFPowerkit.log(
+        "Config folder does not exists, Creating Folder",
+        LoggerLevel.INFO
+      );
       fs.mkdirSync(configDir);
     }
     return configDir + path.sep + fileName;
@@ -86,7 +107,11 @@ export default class FileUtils {
       try {
         fs.mkdirSync(curDir);
       } catch (err) {
-        if (err.code !== "EEXIST" && err.code !== "EPERM") {
+        if (
+          err.code !== "EEXIST" &&
+          err.code !== "EPERM" &&
+          err.code !== "EISDIR"
+        ) {
           throw err;
         }
       }

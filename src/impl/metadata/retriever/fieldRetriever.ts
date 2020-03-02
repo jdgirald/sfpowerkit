@@ -1,12 +1,14 @@
 import { Org } from "@salesforce/core";
-import _ from "lodash";
+import * as _ from "lodash";
 import BaseMetadataRetriever from "./baseMetadataRetriever";
 import { Field } from "../schema";
 import EntityDefinitionRetriever from "./entityDefinitionRetriever";
-import { METADATA_INFO } from "../../../shared/metadataInfo";
+import { METADATA_INFO } from "../metadataInfo";
+import MetadataFiles from "../metadataFiles";
+import { isNullOrUndefined } from "util";
 
 const QUERY =
-  "SELECT Id, QualifiedApiName, EntityDefinitionId, DeveloperName, NamespacePrefix FROM FieldDefinition ";
+  "SELECT Id, QualifiedApiName, EntityDefinitionId, DeveloperName, NamespacePrefix FROM FieldDefinition";
 export default class FieldRetriever extends BaseMetadataRetriever<Field> {
   private static instance: FieldRetriever;
   private constructor(public org: Org) {
@@ -21,6 +23,7 @@ export default class FieldRetriever extends BaseMetadataRetriever<Field> {
   }
   public async getObjects(): Promise<Field[]> {
     let fieldsToReturn: Field[] = [];
+
     if (!this.data && !this.dataLoaded) {
       let entityDefinitionUtils = EntityDefinitionRetriever.getInstance(
         this.org
@@ -35,17 +38,19 @@ export default class FieldRetriever extends BaseMetadataRetriever<Field> {
         let durableId = await entityDefinitionUtils.getDurableIdByObjectName(
           objectName
         );
-        super.setQuery(
-          QUERY + " WHERE EntityDefinitionId ='" + durableId + "'"
-        );
-        let fields = await super.getObjects();
-        fields = fields.map(field => {
-          field.SobjectType = objectName;
-          field.FullName = objectName + "." + field.QualifiedApiName;
-          return field;
-        });
-        this.data[objectName] = fields;
-        fieldsToReturn.push(...fields);
+        if (!isNullOrUndefined(durableId) && durableId.length > 0) {
+          super.setQuery(
+            QUERY + " WHERE EntityDefinitionId ='" + durableId + "'"
+          );
+          let fields = await super.getObjects();
+          fields = fields.map(field => {
+            field.SobjectType = objectName;
+            field.FullName = objectName + "." + field.QualifiedApiName;
+            return field;
+          });
+          this.data[objectName] = fields;
+          fieldsToReturn.push(...fields);
+        }
       }
       this.dataLoaded = true;
     } else {
@@ -73,7 +78,7 @@ export default class FieldRetriever extends BaseMetadataRetriever<Field> {
         objectName
       );
 
-      if (durableId !== undefined && durableId !== "") {
+      if (!isNullOrUndefined(durableId) && durableId.length > 0) {
         super.setQuery(
           QUERY + " WHERE EntityDefinitionId ='" + durableId + "'"
         );
@@ -99,7 +104,7 @@ export default class FieldRetriever extends BaseMetadataRetriever<Field> {
     if (!_.isNil(METADATA_INFO.CustomField.components)) {
       found = METADATA_INFO.CustomField.components.includes(fullName);
     }
-    if (!found) {
+    if (!found && !MetadataFiles.sourceOnly) {
       //not found, check on the org
       let objectName = fieldParts[0];
       let fieldDefinitions = await this.getFieldsByObjectName(objectName);

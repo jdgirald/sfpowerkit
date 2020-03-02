@@ -1,9 +1,10 @@
 import { Layout } from "../schema";
 import { Org } from "@salesforce/core";
-import { METADATA_INFO } from "../../../shared/metadataInfo";
-import _ from "lodash";
+import { METADATA_INFO } from "../metadataInfo";
+import * as _ from "lodash";
 import BaseMetadataRetriever from "./baseMetadataRetriever";
 import EntityDefinitionRetriever from "./entityDefinitionRetriever";
+import MetadataFiles from "../metadataFiles";
 
 const QUERY =
   "SELECT Id, Name, EntityDefinitionId, NamespacePrefix From Layout ";
@@ -54,13 +55,45 @@ export default class LayoutRetriever extends BaseMetadataRetriever<Layout> {
             layouts[i].ObjectName +
             "-" +
             namespace +
-            layouts[i].Name.replace("/", "%2F");
+            layouts[i].Name.replace(/%/g, "%25")
+              .replace(/\//g, "%2F")
+              .replace(new RegExp(/\\/, "g"), "%5C")
+              .replace(/\(/g, "%28")
+              .replace(/\)/g, "%29")
+              .replace(/#/g, "%23")
+              .replace(/\$/g, "%24")
+              .replace(/&/g, "%26")
+              .replace(/~/g, "%7E")
+              .replace(/\[/g, "%5B")
+              .replace(/\]/g, "%5D")
+              .replace(/\^/g, "%5E")
+              .replace(/\{/g, "%7B")
+              .replace(/\}/g, "%7D")
+              .replace(/\|/g, "%7C")
+              .replace(/@/g, "%40")
+              .replace(/'/g, "%27");
         } else {
           layouts[i].FullName =
             layouts[i].EntityDefinitionId +
             "-" +
             namespace +
-            layouts[i].Name.replace("/", "%2F");
+            layouts[i].Name.replace(/%/g, "%25")
+              .replace(/\//g, "%2F")
+              .replace(new RegExp(/\\/, "g"), "%5C")
+              .replace(/\(/g, "%28")
+              .replace(/\)/g, "%29")
+              .replace(/#/g, "%23")
+              .replace(/\$/g, "%24")
+              .replace(/&/g, "%26")
+              .replace(/~/g, "%7E")
+              .replace(/\[/g, "%5B")
+              .replace(/\]/g, "%5D")
+              .replace(/\^/g, "%5E")
+              .replace(/\{/g, "%7B")
+              .replace(/\}/g, "%7D")
+              .replace(/\|/g, "%7C")
+              .replace(/@/g, "%40")
+              .replace(/'/g, "%27");
         }
       }
       this.data = layouts;
@@ -78,7 +111,7 @@ export default class LayoutRetriever extends BaseMetadataRetriever<Layout> {
     if (!_.isNil(METADATA_INFO.Layout.components)) {
       found = METADATA_INFO.Layout.components.includes(layout);
     }
-    if (!found) {
+    if (!found && !MetadataFiles.sourceOnly) {
       //not found, check on the org
       let layouts = await this.getLayouts();
       let foundLayout = layouts.find(l => {

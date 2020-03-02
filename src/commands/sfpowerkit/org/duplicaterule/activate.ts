@@ -10,10 +10,11 @@ import util = require("util");
 // tslint:disable-next-line:ordered-imports
 var jsforce = require("jsforce");
 var path = require("path");
-import { checkRetrievalStatus } from "../../../../shared/checkRetrievalStatus";
-import { checkDeploymentStatus } from "../../../../shared/checkDeploymentStatus";
-import { extract } from "../../../../shared/extract";
-import { zipDirectory } from "../../../../shared/zipDirectory";
+import { checkRetrievalStatus } from "../../../../utils/checkRetrievalStatus";
+import { checkDeploymentStatus } from "../../../../utils/checkDeploymentStatus";
+import { extract } from "../../../../utils/extract";
+import { zipDirectory } from "../../../../utils/zipDirectory";
+import { SFPowerkit } from "../../../../sfpowerkit";
 
 // Initialize Messages with the current plugin directory
 core.Messages.importMessagesDirectory(__dirname);
@@ -46,6 +47,25 @@ export default class Activate extends SfdxCommand {
       required: true,
       char: "n",
       description: messages.getMessage("nameFlagDescription")
+    }),
+    loglevel: flags.enum({
+      description: "logging level for this command invocation",
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
@@ -53,6 +73,7 @@ export default class Activate extends SfdxCommand {
   protected static requiresUsername = true;
 
   public async run(): Promise<AnyJson> {
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
     rimraf.sync("temp_sfpowerkit");
 
     //Connect to the org
@@ -94,7 +115,8 @@ export default class Activate extends SfdxCommand {
     fs.writeFileSync(zipFileName, metadata_retrieve_result.zipFile, {
       encoding: "base64"
     });
-    await extract("temp_sfpowerkit");
+
+    await extract(`./temp_sfpowerkit/unpackaged.zip`, "temp_sfpowerkit");
     fs.unlinkSync(zipFileName);
     let resultFile = `temp_sfpowerkit/duplicateRules/${this.flags.name}.duplicateRule`;
 
@@ -113,7 +135,7 @@ export default class Activate extends SfdxCommand {
       //Do Nothing if its already Active
       if (retrieved_duplicaterule.DuplicateRule.isActive === "true") {
         this.ux.log("Already Active, exiting");
-        return { status: 1 };
+        return 1;
       }
       //Deactivate Rule
       this.ux.log(`Preparing Activation`);
@@ -141,20 +163,26 @@ export default class Activate extends SfdxCommand {
         }
       );
 
-      this.ux.log(`Deploying Activated Rule with ID  ${deployId.id}`);
+      this.ux.log(
+        `Deploying Activated Rule with ID  ${
+          deployId.id
+        }  to ${this.org.getUsername()}`
+      );
       let metadata_deploy_result: DeployResult = await checkDeploymentStatus(
         conn,
         deployId.id
       );
 
       if (!metadata_deploy_result.success)
-        throw new SfdxError("Unable to deploy the Activated rule");
+        throw new SfdxError(
+          `Unable to deploy the Activated rule : ${metadata_deploy_result.details["componentFailures"]["problem"]}`
+        );
 
       this.ux.log(
         `Duplicate Rule ${retrieved_duplicaterule.DuplicateRule.masterLabel} Activated`
       );
 
-      return { status: 1 };
+      return 0;
     } else {
       throw new SfdxError("Duplicate Rule not found in the org");
     }

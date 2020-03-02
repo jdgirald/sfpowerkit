@@ -6,12 +6,12 @@ import {
   SfdxResult
 } from "@salesforce/command";
 
-import { SfdxProject, SfdxError } from "@salesforce/core";
+import { SfdxError } from "@salesforce/core";
 
-import _ from "lodash";
-import { SfPowerKit } from "../../../../sfpowerkit";
+import * as _ from "lodash";
+import { SFPowerkit } from "../../../../sfpowerkit";
 import * as path from "path";
-import { METADATA_INFO } from "../../../../shared/metadataInfo";
+import { METADATA_INFO } from "../../../../impl/metadata/metadataInfo";
 import ProfileRetriever from "../../../../impl/metadata/retriever/profileRetriever";
 import ProfileMerge from "../../../../impl/source/profiles/profileMerge";
 
@@ -64,6 +64,25 @@ export default class Merge extends SfdxCommand {
       char: "d",
       description: messages.getMessage("deleteFlagDescription"),
       required: false
+    }),
+    loglevel: flags.enum({
+      description: "logging level for this command invocation",
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
@@ -93,8 +112,7 @@ export default class Merge extends SfdxCommand {
   };
 
   public async run(): Promise<any> {
-    // tslint:disable-line:no-any
-    SfPowerKit.ux = this.ux;
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
 
     let argFolder = this.flags.folder;
     let argProfileList = this.flags.profilelist;
@@ -129,21 +147,10 @@ export default class Merge extends SfdxCommand {
       }
     }
 
-    if (_.isNil(argFolder) || argFolder.length === 0) {
-      argFolder = [];
-      const dxProject = await SfdxProject.resolve();
-      const project = await dxProject.retrieveSfdxProjectJson();
-
-      let packages = (project.get("packageDirectories") as any[]) || [];
-      packages.forEach(element => {
-        argFolder.push(element.path);
-        if (element.default) {
-          SfPowerKit.defaultFolder = element.path;
-        }
-      });
-    } else {
-      SfPowerKit.defaultFolder = argFolder[0];
+    if (!_.isNil(argFolder) && argFolder.length !== 0) {
+      SFPowerkit.setDefaultFolder(argFolder[0]);
     }
+    ``;
 
     const profileUtils = new ProfileMerge(
       this.org,

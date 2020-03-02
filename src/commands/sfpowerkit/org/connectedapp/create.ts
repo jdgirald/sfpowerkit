@@ -4,6 +4,11 @@ import fs = require("fs-extra");
 import rimraf = require("rimraf");
 
 const spawn = require("child-process-promise").spawn;
+import { zipDirectory } from "../../../../utils/zipDirectory";
+import { AsyncResult, DeployResult } from "jsforce";
+import { checkDeploymentStatus } from "../../../../utils/checkDeploymentStatus";
+import { SfdxError } from "@salesforce/core";
+import { SFPowerkit } from "../../../../sfpowerkit";
 
 // Initialize Messages with the current plugin directory
 core.Messages.importMessagesDirectory(__dirname);
@@ -44,6 +49,25 @@ export default class Create extends SfdxCommand {
       required: true,
       char: "e",
       description: messages.getMessage("emailFlagDescription")
+    }),
+    loglevel: flags.enum({
+      description: "logging level for this command invocation",
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
@@ -58,8 +82,13 @@ export default class Create extends SfdxCommand {
 
   public async run(): Promise<AnyJson> {
     rimraf.sync("temp_sfpowerkit");
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
 
     await this.org.refreshAuth();
+
+    //Connect to the org
+    const conn = this.org.getConnection();
+    const apiversion = await conn.retrieveMaxApiVersion();
 
     // this.org is guaranteed because requiresUsername=true, as opposed to supportsUsername
     const username = this.org.getUsername();
@@ -97,7 +126,7 @@ export default class Create extends SfdxCommand {
              <members>*</members>
              <name>ConnectedApp</name>
          </types>
-         <version>44.0</version>
+         <version>${apiversion}</version>
      </Package>`;
 
     let targetmetadatapath =
@@ -108,25 +137,41 @@ export default class Create extends SfdxCommand {
     let targetpackagepath = "temp_sfpowerkit/mdapi/package.xml";
     fs.outputFileSync(targetpackagepath, package_xml);
 
-    // Split arguments to use spawn
-    const args = [];
-    args.push("force:mdapi:deploy");
+    var zipFile = "temp_sfpowerkit/package.zip";
+    await zipDirectory("temp_sfpowerkit/mdapi", zipFile);
 
-    // USERNAME
-    args.push("--targetusername");
-    args.push(`${username}`);
+    //Deploy Rule
+    conn.metadata.pollTimeout = 300;
+    let deployId: AsyncResult;
 
-    // MANIFEST
-    args.push("--deploydir");
-    args.push(`temp_sfpowerkit/mdapi`);
+    var zipStream = fs.createReadStream(zipFile);
+    await conn.metadata.deploy(
+      zipStream,
+      { rollbackOnError: true, singlePackage: true },
+      function(error, result: AsyncResult) {
+        if (error) {
+          return console.error(error);
+        }
+        deployId = result;
+      }
+    );
 
-    args.push("--wait");
-    args.push(`30`);
+    this.ux.log(
+      `Deploying Connected App with ID  ${
+        deployId.id
+      }  to ${this.org.getUsername()}`
+    );
+    let metadata_deploy_result: DeployResult = await checkDeploymentStatus(
+      conn,
+      deployId.id
+    );
 
-    this.ux.log(`Deploy connected app ${this.connectedapp_label}`);
+    if (!metadata_deploy_result.success)
+      throw new SfdxError(
+        `Unable to deploy the Connected App : ${metadata_deploy_result.details["componentFailures"]["problem"]}`
+      );
 
-    var startTime = new Date().valueOf();
-    await spawn("sfdx", args, { stdio: "inherit" });
+    this.ux.log(`Connected App Deployed`);
 
     rimraf.sync("temp_sfpowerkit");
 

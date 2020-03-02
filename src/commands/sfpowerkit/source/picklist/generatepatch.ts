@@ -8,11 +8,13 @@ import util = require("util");
 import {
   getPackageInfo,
   getDefaultPackageInfo
-} from "../../../../shared/getPackageInfo";
-import { searchFilesInDirectory } from "../../../../shared/searchFilesInDirectory";
+} from "../../../../utils/getPackageInfo";
+import { searchFilesInDirectory } from "../../../../utils/searchFilesInDirectory";
 
-import { zipDirectory } from "../../../../shared/zipDirectory";
-import DiffUtil from "../../../../impl/project/diff/diffutils";
+import { zipDirectory } from "../../../../utils/zipDirectory";
+import MetadataFiles from "../../../../impl/metadata/metadataFiles";
+import { SFPowerkit } from "../../../../sfpowerkit";
+import { LoggerLevel } from "@salesforce/core";
 
 var path = require("path");
 const spawn = require("child-process-promise").spawn;
@@ -34,19 +36,7 @@ export default class Generatepatch extends SfdxCommand {
   public static description = messages.getMessage("commandDescription");
 
   public static examples = [
-    `$ sfdx sfpowerkit:source:picklist:generatepatch -p sfpowerkit_test -d force-app/main/default/objects/ -f
-    Scanning for fields of type picklist
-    Found 2 fields of type picklist
-    Processing and adding the following fields to patch
-    Copied Original to Patch:         force-app\main\default\objects\Case\fields\test_standard2__c.field-meta.xml
-    Modified Original in Packaging:         force-app\main\default\objects\Case\fields\test_standard2__c.field-meta.xml
-    Copied Original to Patch:         force-app\main\default\objects\Case\fields\test_standard__c.field-meta.xml
-    Added  2 fields of field type picklist into patch after'removing fields picklist fields in cmdt objects
-    Added  1 fields of field type picklist that have standard value sets as controlling types
-    Source was successfully converted to Metadata API format and written to the location: C:\Projects\sfpowerkit_test\temp_sfpowerkit\mdapi
-    Generating static resource file : force-app/main/default/staticresources/sfpowerkit_test_picklist.resource-meta.xml
-    Patch sfpowerkit_test_picklist generated successfully.
-  `
+    `$ sfdx sfpowerkit:source:picklist:generatepatch -p sfpowerkit_test -d force-app/main/default/objects/ -f`
   ];
 
   protected static flagsConfig = {
@@ -69,6 +59,33 @@ export default class Generatepatch extends SfdxCommand {
       required: false,
       char: "r",
       description: messages.getMessage("fixRecordTypes")
+    }),
+    movestandardvalueset: flags.boolean({
+      required: false,
+      char: "m",
+      description: messages.getMessage("movestandardvalueSetDescription")
+    }),
+    apiversion: flags.builtin({
+      description: messages.getMessage("apiversion")
+    }),
+    loglevel: flags.enum({
+      description: messages.getMessage("loglevel"),
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
@@ -76,7 +93,14 @@ export default class Generatepatch extends SfdxCommand {
     //clean any existing temp sf powerkit source folder
     rimraf.sync("temp_sfpowerkit");
 
-    //
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
+    //Deprecation notice
+    SFPowerkit.log(
+      "--------DEPRECATION NOTICE--------\n" +
+        "This command is now deprecated and will be removed shortly, please use standard methods.\n" +
+        "-------------------------------------------------------------------------------",
+      LoggerLevel.WARN
+    );
 
     // Getting Project config
     const project = await SfdxProject.resolve();
@@ -90,6 +114,8 @@ export default class Generatepatch extends SfdxCommand {
       packageToBeUsed = getDefaultPackageInfo(projectJson);
     }
 
+    this.flags.apiversion = this.flags.apiversion || "47.0";
+
     //set objects directory
     let objectsDirPath;
     if (this.flags.objectsdir) objectsDirPath = this.flags.objectsdir;
@@ -97,18 +123,28 @@ export default class Generatepatch extends SfdxCommand {
       objectsDirPath = packageToBeUsed.path + `/main/default/objects/`;
     }
 
-    await this.gemeratePatchForCustomPicklistField(
+    let status = await this.generatePatchForCustomPicklistField(
       objectsDirPath,
       this.flags.fixstandardvalueset
     );
 
-    this.ux.log(
-      "--------------------------------------------------------------------------------"
+    if (!status) return 1;
+
+    SFPowerkit.log(
+      "--------------------------------------------------------------------------------",
+      LoggerLevel.INFO
     );
 
     if (this.flags.fixrecordtypes) {
-      await this.gemeratePatchForBusinessProcess(objectsDirPath);
-      await this.gemeratePatchForRecordTypes(objectsDirPath);
+      let status = await this.generatePatchForBusinessProcess(objectsDirPath);
+      if (!status) return 1;
+      status = await this.generatePatchForRecordTypes(objectsDirPath);
+      if (!status) return 1;
+    }
+
+    if (this.flags.movestandardvalueset) {
+      status = await this.generatePatchForStandardValuset(objectsDirPath);
+      if (!status) return 1;
     }
 
     // sfdx project json file running force source command
@@ -120,7 +156,7 @@ export default class Generatepatch extends SfdxCommand {
           }
         ],
         "namespace": "",
-        "sourceApiVersion": "46.0"
+        "sourceApiVersion": "${this.flags.apiversion}"
       }`;
 
     fs.outputFileSync("temp_sfpowerkit/sfdx-project.json", sfdx_project_json);
@@ -171,34 +207,39 @@ export default class Generatepatch extends SfdxCommand {
         packageToBeUsed.path +
         `/main/default/staticresources/${packageToBeUsed.package}_picklist.resource-meta.xml`;
 
-      this.ux.log(
-        "Generating static resource file : " + `${targetmetadatapath}`
+      SFPowerkit.log(
+        "Generating static resource file : " + `${targetmetadatapath}`,
+        LoggerLevel.INFO
       );
 
       fs.outputFileSync(targetmetadatapath, metadata);
 
-      this.ux.log(
-        `Patch ${packageToBeUsed.package}_picklist generated successfully.`
+      SFPowerkit.log(
+        `Patch ${packageToBeUsed.package}_picklist generated successfully.`,
+        LoggerLevel.INFO
       );
     } else {
-      this.ux.log(`No picklist or recordtype found to create a Patch `);
+      SFPowerkit.log(
+        `No picklist or recordtype found to create a Patch `,
+        LoggerLevel.WARN
+      );
     }
     //clean temp sf powerkit source folder
     rimraf.sync("temp_sfpowerkit");
     return 0;
   }
 
-  private async gemeratePatchForCustomPicklistField(
+  private async generatePatchForCustomPicklistField(
     objectsDirPath: string,
     isStandardValueSetToBeFixed: boolean
-  ) {
+  ): Promise<boolean> {
     if (isStandardValueSetToBeFixed) {
       this.ux
         .log(`Warning, your package source code will be modified to remove references to standard value set and will be 
       added into the patch`);
     }
 
-    this.ux.log("Scanning for fields of type picklist");
+    SFPowerkit.log("Scanning for fields of type picklist", LoggerLevel.INFO);
 
     //search picklist
     let customFieldsWithPicklist: any[] = searchFilesInDirectory(
@@ -213,30 +254,46 @@ export default class Generatepatch extends SfdxCommand {
       "<type>MultiselectPicklist</type>",
       ".xml"
     );
-    
-    if (customFieldsWithMultiPicklist && customFieldsWithMultiPicklist.length > 0) {
-      customFieldsWithPicklist = customFieldsWithPicklist.concat(customFieldsWithMultiPicklist);
+
+    if (
+      customFieldsWithMultiPicklist &&
+      customFieldsWithMultiPicklist.length > 0
+    ) {
+      customFieldsWithPicklist = customFieldsWithPicklist.concat(
+        customFieldsWithMultiPicklist
+      );
     }
 
     if (customFieldsWithPicklist && customFieldsWithPicklist.length > 0) {
-      this.ux.log(
+      SFPowerkit.log(
         "Found " +
           `${customFieldsWithPicklist.length}` +
-          " fields of type picklist"
+          " fields of type picklist",
+        LoggerLevel.INFO
       );
 
-      this.ux.log("Processing and adding the following fields to patch");
-
-      let diffUtils = new DiffUtil("0", "0");
+      SFPowerkit.log(
+        "Processing and adding the following fields to patch",
+        LoggerLevel.INFO
+      );
 
       let in_patch_count = 0;
       let modified_source_count = 0;
       for (const file of customFieldsWithPicklist) {
         const parser = new xml2js.Parser({ explicitArray: false });
         const parseString = util.promisify(parser.parseString);
-        let field_metadata = await parseString(
-          fs.readFileSync(path.resolve(file))
-        );
+        let field_metadata;
+        try {
+          field_metadata = await parseString(
+            fs.readFileSync(path.resolve(file))
+          );
+        } catch (e) {
+          SFPowerkit.log(
+            `Unable to parse file ${file} due to ${e}`,
+            LoggerLevel.FATAL
+          );
+          return Promise.reject(e);
+        }
 
         let controllingField: string = (
           field_metadata.CustomField.valueSet || {}
@@ -251,8 +308,11 @@ export default class Generatepatch extends SfdxCommand {
           ) {
             if (isStandardValueSetToBeFixed) {
               in_patch_count++;
-              this.ux.log("Copied Original to Patch:         " + file);
-              diffUtils.copyFile(file, "temp_sfpowerkit");
+              SFPowerkit.log(
+                "Copied Original to Patch:         " + file,
+                LoggerLevel.INFO
+              );
+              MetadataFiles.copyFile(file, "temp_sfpowerkit");
 
               modified_source_count++;
 
@@ -261,31 +321,42 @@ export default class Generatepatch extends SfdxCommand {
               delete field_metadata.CustomField.valueSet.valueSettings;
               var xml = builder.buildObject(field_metadata);
               fs.writeFileSync(file, xml);
-              this.ux.log("Modified Original in Packaging:         " + file);
+              SFPowerkit.log(
+                "Modified Original in Packaging:         " + file,
+                LoggerLevel.INFO
+              );
             }
           } else {
             in_patch_count++;
-            this.ux.log("Copied Original to Patch:         " + file);
-            diffUtils.copyFile(file, "temp_sfpowerkit");
+            SFPowerkit.log(
+              "Copied Original to Patch:         " + file,
+              LoggerLevel.INFO
+            );
+            MetadataFiles.copyFile(file, "temp_sfpowerkit");
           }
         }
       }
 
-      this.ux.log(
-        `Added  ${in_patch_count} fields of field type picklist into patch after'removing fields picklist fields in cmdt objects`
+      SFPowerkit.log(
+        `Added  ${in_patch_count} fields of field type picklist into patch after'removing fields picklist fields in cmdt objects`,
+        LoggerLevel.INFO
       );
       if (this.flags.fixstandardvalueset)
-        this.ux.log(
-          `Modified  ${modified_source_count} fields of field type picklist that have standard value sets as controlling types in packaging folder`
+        SFPowerkit.log(
+          `Modified  ${modified_source_count} fields of field type picklist that have standard value sets as controlling types in packaging folder`,
+          LoggerLevel.INFO
         );
     }
+    return Promise.resolve(true);
   }
 
-  private async gemeratePatchForRecordTypes(objectsDirPath: string) {
+  private async generatePatchForRecordTypes(
+    objectsDirPath: string
+  ): Promise<boolean> {
     this.ux
       .log(`Warning, your package source code will be modified to remove references to standard value set and the orginal source code
     will be  added into the patch`);
-    this.ux.log("Scanning for recordtypes");
+    SFPowerkit.log("Scanning for recordtypes", LoggerLevel.INFO);
     let recordTypes: any[] = searchFilesInDirectory(
       objectsDirPath,
       '<RecordType xmlns="http://soap.sforce.com/2006/04/metadata">',
@@ -293,11 +364,16 @@ export default class Generatepatch extends SfdxCommand {
     );
 
     if (recordTypes && recordTypes.length > 0) {
-      this.ux.log("Found " + `${recordTypes.length}` + " RecordTypes");
+      SFPowerkit.log(
+        "Found " + `${recordTypes.length}` + " RecordTypes",
+        LoggerLevel.INFO
+      );
 
-      this.ux.log("Processing and adding the following fields to patch");
+      SFPowerkit.log(
+        "Processing and adding the following fields to patch",
+        LoggerLevel.INFO
+      );
 
-      let diffUtils = new DiffUtil("0", "0");
       let in_patch_count = 0;
       let modified_source_count = 0;
       for (const file of recordTypes) {
@@ -306,28 +382,54 @@ export default class Generatepatch extends SfdxCommand {
 
         const parser = new xml2js.Parser({ explicitArray: false });
         const parseString = util.promisify(parser.parseString);
-        let recordtype_metadata = await parseString(
-          fs.readFileSync(path.resolve(file))
-        );
+        let recordtype_metadata;
+        try {
+          recordtype_metadata = await parseString(
+            fs.readFileSync(path.resolve(file))
+          );
+        } catch (e) {
+          SFPowerkit.log(
+            `Unable to parse file ${file} due to ${e}`,
+            LoggerLevel.FATAL
+          );
+          return false;
+        }
 
-        this.ux.log("Copied Original to Patch:         " + file);
-        diffUtils.copyFile(file, "temp_sfpowerkit");
+        SFPowerkit.log(
+          "Copied Original to Patch:         " + file,
+          LoggerLevel.INFO
+        );
+        MetadataFiles.copyFile(file, "temp_sfpowerkit");
         delete recordtype_metadata.RecordType.picklistValues;
 
         let builder = new xml2js.Builder();
         var xml = builder.buildObject(recordtype_metadata);
         fs.writeFileSync(file, xml);
-        this.ux.log("Modified Original in Packaging:         " + file);
+        SFPowerkit.log(
+          "Modified Original in Packaging:         " + file,
+          LoggerLevel.INFO
+        );
       }
 
-      this.ux.log(`Added  ${in_patch_count}  RecordType to patch`);
-      this.ux.log(
-        `Modified  ${modified_source_count} RecordTypes in packaging folder`
+      SFPowerkit.log(
+        `Added  ${in_patch_count}  RecordType to patch`,
+        LoggerLevel.INFO
+      );
+      SFPowerkit.log(
+        `Modified  ${modified_source_count} RecordTypes in packaging folder`,
+        LoggerLevel.INFO
       );
     }
+    SFPowerkit.log(
+      "--------------------------------------------------------------------------------",
+      LoggerLevel.INFO
+    );
+    return true;
   }
 
-  private async gemeratePatchForBusinessProcess(objectsDirPath: string) {
+  private async generatePatchForBusinessProcess(
+    objectsDirPath: string
+  ): Promise<boolean> {
     let patch_value = {
       fullName: "New",
       default: "true"
@@ -336,7 +438,7 @@ export default class Generatepatch extends SfdxCommand {
     this.ux
       .log(`Warning, your package source code will be modified to remove references to standard value set and the orginal source code
     will be  added into the patch`);
-    this.ux.log("Scanning for BusinessProcess");
+    SFPowerkit.log("Scanning for BusinessProcess", LoggerLevel.INFO);
     let businessProcess: any[] = searchFilesInDirectory(
       objectsDirPath,
       '<BusinessProcess xmlns="http://soap.sforce.com/2006/04/metadata">',
@@ -344,11 +446,16 @@ export default class Generatepatch extends SfdxCommand {
     );
 
     if (businessProcess && businessProcess.length > 0) {
-      this.ux.log("Found " + `${businessProcess.length}` + " BusinessProcess");
+      SFPowerkit.log(
+        "Found " + `${businessProcess.length}` + " BusinessProcess",
+        LoggerLevel.INFO
+      );
 
-      this.ux.log("Processing and adding the following fields to patch");
+      SFPowerkit.log(
+        "Processing and adding the following fields to patch",
+        LoggerLevel.INFO
+      );
 
-      let diffUtils = new DiffUtil("0", "0");
       let in_patch_count = 0;
       let modified_source_count = 0;
       for (const file of businessProcess) {
@@ -357,25 +464,94 @@ export default class Generatepatch extends SfdxCommand {
 
         const parser = new xml2js.Parser({ explicitArray: false });
         const parseString = util.promisify(parser.parseString);
-        let businessProcess_metadata = await parseString(
-          fs.readFileSync(path.resolve(file))
-        );
+        let businessProcess_metadata;
+        try {
+          businessProcess_metadata = await parseString(
+            fs.readFileSync(path.resolve(file))
+          );
+        } catch (e) {
+          SFPowerkit.log(
+            `Unable to parse file ${file} due to ${e}`,
+            LoggerLevel.FATAL
+          );
+          return false;
+        }
 
-        this.ux.log("Copied Original to Patch:         " + file);
-        diffUtils.copyFile(file, "temp_sfpowerkit");
+        SFPowerkit.log(
+          "Copied Original to Patch:         " + file,
+          LoggerLevel.INFO
+        );
+        MetadataFiles.copyFile(file, "temp_sfpowerkit");
         businessProcess_metadata.BusinessProcess.values = [];
         businessProcess_metadata.BusinessProcess.values.push(patch_value);
 
         let builder = new xml2js.Builder();
         var xml = builder.buildObject(businessProcess_metadata);
         fs.writeFileSync(file, xml);
-        this.ux.log("Modified Original in Packaging:         " + file);
+        SFPowerkit.log(
+          "Modified Original in Packaging:         " + file,
+          LoggerLevel.INFO
+        );
       }
 
-      this.ux.log(`Added  ${in_patch_count}  BusinessProcess to patch`);
-      this.ux.log(
-        `Modified  ${modified_source_count} BusinessProcess in packaging folder`
+      SFPowerkit.log(
+        `Added  ${in_patch_count}  BusinessProcess to patch`,
+        LoggerLevel.INFO
+      );
+      SFPowerkit.log(
+        `Modified  ${modified_source_count} BusinessProcess in packaging folder`,
+        LoggerLevel.INFO
       );
     }
+    SFPowerkit.log(
+      "--------------------------------------------------------------------------------",
+      LoggerLevel.INFO
+    );
+    return true;
+  }
+
+  private async generatePatchForStandardValuset(
+    objectsDirPath: string
+  ): Promise<boolean> {
+    this.ux
+      .log(`Warning, your package source code will be modified to remove standard valueset. The modified source will be 
+    added into the patch`);
+
+    let standardValueSetPath = objectsDirPath.replace("objects", "");
+    if (standardValueSetPath.includes("//")) {
+      standardValueSetPath = standardValueSetPath.replace("//", "/");
+    }
+    standardValueSetPath = standardValueSetPath + "standardValueSets/";
+
+    if (fs.existsSync(path.resolve(standardValueSetPath))) {
+      let standardValueSets: any[] = searchFilesInDirectory(
+        standardValueSetPath,
+        '<StandardValueSet xmlns="http://soap.sforce.com/2006/04/metadata">',
+        ".xml"
+      );
+      if (standardValueSets.length > 0) {
+        SFPowerkit.log(
+          `Found ${standardValueSets.length} Standard valueset in ${standardValueSetPath}`,
+          LoggerLevel.INFO
+        );
+        for (const file of standardValueSets) {
+          SFPowerkit.log(
+            "Copied Original to Patch:         " + file,
+            LoggerLevel.INFO
+          );
+          MetadataFiles.copyFile(file, "temp_sfpowerkit");
+        }
+      }
+      SFPowerkit.log(
+        `Removing ${standardValueSetPath} from source`,
+        LoggerLevel.INFO
+      );
+      rimraf.sync(standardValueSetPath);
+      SFPowerkit.log(
+        "--------------------------------------------------------------------------------",
+        LoggerLevel.INFO
+      );
+    }
+    return Promise.resolve(true);
   }
 }

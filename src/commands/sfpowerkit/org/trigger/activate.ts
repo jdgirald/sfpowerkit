@@ -19,10 +19,11 @@ import util = require("util");
 // tslint:disable-next-line:ordered-imports
 var jsforce = require("jsforce");
 var path = require("path");
-import { checkRetrievalStatus } from "../../../../shared/checkRetrievalStatus";
-import { checkDeploymentStatus } from "../../../../shared/checkDeploymentStatus";
-import { extract } from "../../../../shared/extract";
-import { zipDirectory } from "../../../../shared/zipDirectory";
+import { checkRetrievalStatus } from "../../../../utils/checkRetrievalStatus";
+import { checkDeploymentStatus } from "../../../../utils/checkDeploymentStatus";
+import { extract } from "../../../../utils/extract";
+import { zipDirectory } from "../../../../utils/zipDirectory";
+import { SFPowerkit } from "../../../../sfpowerkit";
 
 // Initialize Messages with the current plugin directory
 core.Messages.importMessagesDirectory(__dirname);
@@ -51,6 +52,25 @@ export default class Activate extends SfdxCommand {
       required: true,
       char: "n",
       description: messages.getMessage("nameFlagDescription")
+    }),
+    loglevel: flags.enum({
+      description: "logging level for this command invocation",
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
@@ -59,6 +79,7 @@ export default class Activate extends SfdxCommand {
 
   public async run(): Promise<AnyJson> {
     rimraf.sync("temp_sfpowerkit");
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
 
     //Connect to the org
     await this.org.refreshAuth();
@@ -99,7 +120,8 @@ export default class Activate extends SfdxCommand {
     fs.writeFileSync(zipFileName, metadata_retrieve_result.zipFile, {
       encoding: "base64"
     });
-    await extract("temp_sfpowerkit");
+
+    await extract(`./temp_sfpowerkit/unpackaged.zip`, "temp_sfpowerkit");
     fs.unlinkSync(zipFileName);
     let resultFile = `temp_sfpowerkit/triggers/${this.flags.name}.trigger-meta.xml`;
 
@@ -140,17 +162,23 @@ export default class Activate extends SfdxCommand {
         }
       );
 
-      this.ux.log(`Deploying Activated ApexTrigger with ID  ${deployId.id}`);
+      this.ux.log(
+        `Deploying Activated ApexTrigger with ID  ${
+          deployId.id
+        } to ${this.org.getUsername()}`
+      );
       let metadata_deploy_result: DeployResult = await checkDeploymentStatus(
         conn,
         deployId.id
       );
 
       if (!metadata_deploy_result.success)
-        throw new SfdxError("Unable to deploy the Activated Apex Trigger");
+        throw new SfdxError(
+          `Unable to deploy the Activated Apex Trigger : ${metadata_deploy_result.details["componentFailures"]["problem"]}`
+        );
 
       this.ux.log(`ApexTrigger ${this.flags.name} Activated`);
-      return { status: 1 };
+      return 0;
     } else {
       throw new SfdxError("Apex Trigger not found in the org");
     }

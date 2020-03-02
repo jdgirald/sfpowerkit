@@ -19,9 +19,10 @@ import util = require("util");
 // tslint:disable-next-line:ordered-imports
 var jsforce = require("jsforce");
 var path = require("path");
-import { checkRetrievalStatus } from "../../../shared/checkRetrievalStatus";
-import { checkDeploymentStatus } from "../../../shared/checkDeploymentStatus";
-import { extract } from "../../../shared/extract";
+import { checkRetrievalStatus } from "../../../utils/checkRetrievalStatus";
+import { checkDeploymentStatus } from "../../../utils/checkDeploymentStatus";
+import { extract } from "../../../utils/extract";
+import { SFPowerkit } from "../../../sfpowerkit";
 
 // Initialize Messages with the current plugin directory
 core.Messages.importMessagesDirectory(__dirname);
@@ -49,6 +50,25 @@ export default class Applypatch extends SfdxCommand {
       required: true,
       char: "n",
       description: messages.getMessage("nameFlagDescription")
+    }),
+    loglevel: flags.enum({
+      description: "logging level for this command invocation",
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
@@ -57,6 +77,7 @@ export default class Applypatch extends SfdxCommand {
 
   public async run(): Promise<AnyJson> {
     rimraf.sync("temp_sfpowerkit");
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
 
     //Connect to the org
     await this.org.refreshAuth();
@@ -67,7 +88,7 @@ export default class Applypatch extends SfdxCommand {
       apiVersion: apiversion
     };
 
-    //Retrieve Duplicate Rule
+    //Retrieve Static  Resource
     retrieveRequest["singlePackage"] = true;
     retrieveRequest["unpackaged"] = {
       types: { name: "StaticResource", members: this.flags.name }
@@ -100,7 +121,7 @@ export default class Applypatch extends SfdxCommand {
     });
 
     if (fs.existsSync(path.resolve(zipFileName))) {
-      await extract("temp_sfpowerkit");
+      await extract(`./temp_sfpowerkit/unpackaged.zip`, "temp_sfpowerkit");
       fs.unlinkSync(zipFileName);
 
       let resultFile = `temp_sfpowerkit/staticresources/${this.flags.name}.resource`;
@@ -125,18 +146,22 @@ export default class Applypatch extends SfdxCommand {
           }
         );
 
-        this.ux.log(`Deploying Patch with ID  ${deployId.id}`);
+        this.ux.log(
+          `Deploying Patch with ID  ${deployId.id} to ${this.org.getUsername()}`
+        );
         let metadata_deploy_result: DeployResult = await checkDeploymentStatus(
           conn,
           deployId.id
         );
 
         if (!metadata_deploy_result.success)
-          throw new SfdxError("Unable to deploy the Patch");
+          throw new SfdxError(
+            `Unable to deploy the Patch : ${metadata_deploy_result.details["componentFailures"]}`
+          );
 
         this.ux.log(`Patch ${this.flags.name} Deployed successfully.`);
         rimraf.sync("temp_sfpowerkit");
-        return { status: 1 };
+        return 1;
       } else {
         this.ux.log(`Patch ${this.flags.name} not found in the org`);
         rimraf.sync("temp_sfpowerkit");

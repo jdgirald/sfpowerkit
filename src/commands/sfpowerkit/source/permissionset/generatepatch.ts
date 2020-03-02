@@ -3,13 +3,16 @@ import fs from "fs-extra";
 import { core, flags, SfdxCommand } from "@salesforce/command";
 import rimraf = require("rimraf");
 import { SfdxProject } from "@salesforce/core";
+import ignore from "ignore";
 import {
   getPackageInfo,
   getDefaultPackageInfo
-} from "../../../../shared/getPackageInfo";
-import { searchFilesInDirectory } from "../../../../shared/searchFilesInDirectory";
-import DiffUtil from "../../../../impl/project/diff/diffutils";
-import { zipDirectory } from "../../../../shared/zipDirectory";
+} from "../../../../utils/getPackageInfo";
+import { searchFilesInDirectory } from "../../../../utils/searchFilesInDirectory";
+import { zipDirectory } from "../../../../utils/zipDirectory";
+import MetadataFiles from "../../../../impl/metadata/metadataFiles";
+import { SFPowerkit } from "../../../../sfpowerkit";
+import { LoggerLevel } from "@salesforce/core";
 
 var path = require("path");
 const spawn = require("child-process-promise").spawn;
@@ -31,13 +34,7 @@ export default class Generatepatch extends SfdxCommand {
   public static description = messages.getMessage("commandDescription");
 
   public static examples = [
-    `$ sfdx sfpowerkit:source:permissionset:generatepatch -p Core -d src/core/main/default/permissionsets
-     Scanning for permissionsets
-     Found 30 permissionsets
-     Source was successfully converted to Metadata API format and written to the location: .../temp_sfpowerkit/mdapi
-     Generating static resource file : src/core/main/default/staticresources/Core_permissionsets.resource-meta.xml
-     Patch Core_permissionsets generated successfully.
-  `
+    `$ sfdx sfpowerkit:source:permissionset:generatepatch -p Core -d src/core/main/default/permissionsets`
   ];
 
   protected static flagsConfig = {
@@ -50,12 +47,44 @@ export default class Generatepatch extends SfdxCommand {
       required: false,
       char: "d",
       description: messages.getMessage("permsetDirFlagDescription")
+    }),
+    apiversion: flags.builtin({
+      description: messages.getMessage("apiversion")
+    }),
+    loglevel: flags.enum({
+      description: messages.getMessage("loglevel"),
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
   public async run(): Promise<AnyJson> {
     //clean any existing temp sf powerkit source folder
     rimraf.sync("temp_sfpowerkit");
+
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
+    //Deprecation notice
+    SFPowerkit.log(
+      "--------DEPRECATION NOTICE--------\n" +
+        "This command is now deprecated and will be removed shortly, please use standard methods.\n" +
+        "refer https://success.salesforce.com/issues_view?id=a1p3A0000003UjTQAU for more information.\n" +
+        "-------------------------------------------------------------------------------",
+      LoggerLevel.WARN
+    );
 
     // Getting Project config
     const project = await SfdxProject.resolve();
@@ -69,6 +98,8 @@ export default class Generatepatch extends SfdxCommand {
       packageToBeUsed = getDefaultPackageInfo(projectJson);
     }
 
+    this.flags.apiversion = this.flags.apiversion || "47.0";
+
     //set permset directory
     let permsetDirPath;
     if (this.flags.permsetdir) permsetDirPath = this.flags.permsetdir;
@@ -76,7 +107,7 @@ export default class Generatepatch extends SfdxCommand {
       permsetDirPath = packageToBeUsed.path + `/main/default/permissionsets/`;
     }
 
-    this.ux.log("Scanning for Permissionsets");
+    SFPowerkit.log("Scanning for Permissionsets", LoggerLevel.INFO);
 
     let permissionsetList: any[] = searchFilesInDirectory(
       permsetDirPath,
@@ -85,14 +116,22 @@ export default class Generatepatch extends SfdxCommand {
     );
 
     if (permissionsetList && permissionsetList.length > 0) {
-      this.ux.log("Found " + `${permissionsetList.length}` + " Permissionsets");
-
-      let diffUtils = new DiffUtil("0", "0");
+      SFPowerkit.log(
+        "Found " + `${permissionsetList.length}` + " Permissionsets",
+        LoggerLevel.INFO
+      );
 
       fs.mkdirSync("temp_sfpowerkit");
-
+      let forceignore = ignore().add(
+        fs.readFileSync(".forceignore", "utf8").toString()
+      );
       permissionsetList.forEach(file => {
-        diffUtils.copyFile(file, "temp_sfpowerkit");
+        let isIgnored = forceignore.ignores(path.relative(process.cwd(), file));
+        if (!isIgnored) {
+          MetadataFiles.copyFile(file, "temp_sfpowerkit");
+        } else {
+          SFPowerkit.log(`${file} is ignored`, LoggerLevel.INFO);
+        }
       });
 
       var sfdx_project_json: string = `{
@@ -103,7 +142,7 @@ export default class Generatepatch extends SfdxCommand {
           }
         ],
         "namespace": "",
-        "sourceApiVersion": "46.0"
+        "sourceApiVersion": "${this.flags.apiversion}"
       }`;
 
       fs.outputFileSync("temp_sfpowerkit/sfdx-project.json", sfdx_project_json);
@@ -148,20 +187,22 @@ export default class Generatepatch extends SfdxCommand {
         packageToBeUsed.path +
         `/main/default/staticresources/${packageToBeUsed.package}_permissionsets.resource-meta.xml`;
 
-      this.ux.log(
-        "Generating static resource file : " + `${targetmetadatapath}`
+      SFPowerkit.log(
+        "Generating static resource file : " + `${targetmetadatapath}`,
+        LoggerLevel.INFO
       );
 
       fs.outputFileSync(targetmetadatapath, metadata);
 
-      this.ux.log(
-        `Patch ${packageToBeUsed.package}_permissionsets generated successfully.`
+      SFPowerkit.log(
+        `Patch ${packageToBeUsed.package}_permissionsets generated successfully.`,
+        LoggerLevel.INFO
       );
 
       //clean temp sf powerkit source folder
       rimraf.sync("temp_sfpowerkit");
     } else {
-      this.ux.log("No permissionsets found");
+      SFPowerkit.log("No permissionsets found", LoggerLevel.INFO);
     }
 
     return 0;

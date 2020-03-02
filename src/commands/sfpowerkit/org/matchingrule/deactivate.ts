@@ -9,10 +9,11 @@ import util = require("util");
 // tslint:disable-next-line:ordered-imports
 var jsforce = require("jsforce");
 var path = require("path");
-import { checkRetrievalStatus } from "../../../../shared/checkRetrievalStatus";
-import { checkDeploymentStatus } from "../../../../shared/checkDeploymentStatus";
-import { extract } from "../../../../shared/extract";
-import { zipDirectory } from "../../../../shared/zipDirectory";
+import { checkRetrievalStatus } from "../../../../utils/checkRetrievalStatus";
+import { checkDeploymentStatus } from "../../../../utils/checkDeploymentStatus";
+import { extract } from "../../../../utils/extract";
+import { zipDirectory } from "../../../../utils/zipDirectory";
+import { SFPowerkit } from "../../../../sfpowerkit";
 
 // Initialize Messages with the current plugin directory
 core.Messages.importMessagesDirectory(__dirname);
@@ -45,6 +46,25 @@ export default class Deactivate extends SfdxCommand {
       required: true,
       char: "n",
       description: messages.getMessage("nameFlagDescription")
+    }),
+    loglevel: flags.enum({
+      description: "logging level for this command invocation",
+      default: "info",
+      required: false,
+      options: [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "fatal",
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "FATAL"
+      ]
     })
   };
 
@@ -53,6 +73,7 @@ export default class Deactivate extends SfdxCommand {
 
   public async run(): Promise<AnyJson> {
     rimraf.sync("temp_sfpowerkit");
+    SFPowerkit.setLogLevel(this.flags.loglevel, this.flags.json);
 
     //Connect to the org
     await this.org.refreshAuth();
@@ -93,7 +114,8 @@ export default class Deactivate extends SfdxCommand {
     fs.writeFileSync(zipFileName, metadata_retrieve_result.zipFile, {
       encoding: "base64"
     });
-    await extract("temp_sfpowerkit");
+
+    await extract(`./temp_sfpowerkit/unpackaged.zip`, "temp_sfpowerkit");
     fs.unlinkSync(zipFileName);
     let resultFile = `temp_sfpowerkit/matchingRules/${this.flags.name}.matchingRule`;
 
@@ -107,17 +129,25 @@ export default class Deactivate extends SfdxCommand {
 
       this.ux.log(`Retrieved Matching Rule  for Object : ${this.flags.name}`);
 
-      //Deactivate Rule
-      this.ux.log(`Preparing Deactivation`);
-
       if (isJsonArray(retrieve_matchingRule.MatchingRules.matchingRules)) {
         retrieve_matchingRule.MatchingRules.matchingRules.forEach(element => {
           element.ruleStatus = "Inactive";
         });
       } else {
-        retrieve_matchingRule.MatchingRules.matchingRules.ruleStatus =
-          "Inactive";
+        if (
+          !util.isNullOrUndefined(
+            retrieve_matchingRule.MatchingRules.matchingRules
+          )
+        )
+          retrieve_matchingRule.MatchingRules.matchingRules.ruleStatus =
+            "Inactive";
+        else {
+          throw new SfdxError("No Custom Matching Rule  found in the org");
+        }
       }
+
+      //Deactivate Rule
+      this.ux.log(`Preparing Deactivation`);
 
       let builder = new xml2js.Builder();
       var xml = builder.buildObject(retrieve_matchingRule);
@@ -143,7 +173,9 @@ export default class Deactivate extends SfdxCommand {
       );
 
       this.ux.log(
-        `Deploying Deactivated Matching Rule with ID  ${deployId.id}`
+        `Deploying Deactivated Matching Rule with ID  ${
+          deployId.id
+        }  to ${this.org.getUsername()}`
       );
       let metadata_deploy_result: DeployResult = await checkDeploymentStatus(
         conn,
@@ -151,10 +183,12 @@ export default class Deactivate extends SfdxCommand {
       );
 
       if (!metadata_deploy_result.success)
-        throw new SfdxError("Unable to deploy the deactivated matching rule");
+        throw new SfdxError(
+          `Unable to deploy the deactivated matching rule : ${metadata_deploy_result.details["componentFailures"]["problem"]}`
+        );
 
       this.ux.log(`Matching Rule for ${this.flags.name} deactivated`);
-      return { status: 1 };
+      return 0;
     } else {
       throw new SfdxError("Matching Rule not found in the org");
     }

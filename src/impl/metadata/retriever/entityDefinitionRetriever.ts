@@ -1,11 +1,15 @@
 import { Org } from "@salesforce/core";
-import _ from "lodash";
+import * as _ from "lodash";
 import BaseMetadataRetriever from "./baseMetadataRetriever";
 import { EntityDefinition } from "../schema";
-import { METADATA_INFO } from "../../../shared/metadataInfo";
+import { METADATA_INFO } from "../metadataInfo";
+import MetadataFiles from "../metadataFiles";
 
+const COUNT_QUERY = "SELECT COUNT() FROM EntityDefinition";
 const QUERY =
   "SELECT DurableId, DeveloperName, QualifiedApiName, NamespacePrefix FROM EntityDefinition order by QualifiedApiName";
+const FETCH_SIZE = 2000;
+
 export default class EntityDefinitionRetriever extends BaseMetadataRetriever<
   EntityDefinition
 > {
@@ -13,6 +17,7 @@ export default class EntityDefinitionRetriever extends BaseMetadataRetriever<
   private objectForPermission: string[];
   private constructor(public org: Org) {
     super(org, true);
+    super.setCountQuery(COUNT_QUERY, FETCH_SIZE);
     super.setQuery(QUERY);
   }
 
@@ -28,11 +33,12 @@ export default class EntityDefinitionRetriever extends BaseMetadataRetriever<
       (this.data === undefined || this.data.length == 0) &&
       !this.dataLoaded
     ) {
-      super.setQuery(QUERY);
       let entities = await super.getObjects();
+
       this.data = entities;
       this.dataLoaded = true;
     }
+
     return this.data;
   }
   public async getEntityDefinitions(): Promise<EntityDefinition[]> {
@@ -103,10 +109,26 @@ export default class EntityDefinitionRetriever extends BaseMetadataRetriever<
     if (!_.isNil(METADATA_INFO.CustomObject.components)) {
       found = METADATA_INFO.CustomObject.components.includes(object);
     }
-    if (!found) {
+    if (!found && !MetadataFiles.sourceOnly) {
       //not found, check on the org
       let objects = await this.getObjectForPermission();
       found = objects.includes(object);
+    }
+    return found;
+  }
+  public async existCustomMetadata(custonObjectStr: string): Promise<boolean> {
+    let found = false;
+    //Look first in project files
+    if (!_.isNil(METADATA_INFO.CustomObject.components)) {
+      found = METADATA_INFO.CustomObject.components.includes(custonObjectStr);
+    }
+    if (!found && !MetadataFiles.sourceOnly) {
+      //not found, check on the org
+      let objects = await this.getObjects();
+      let foundObj = objects.find(obj => {
+        return obj.QualifiedApiName === custonObjectStr;
+      });
+      found = foundObj !== undefined;
     }
     return found;
   }

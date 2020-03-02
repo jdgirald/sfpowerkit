@@ -1,8 +1,9 @@
 import { Org } from "@salesforce/core";
-import { METADATA_INFO } from "../../../shared/metadataInfo";
-import _ from "lodash";
+import { METADATA_INFO } from "../metadataInfo";
+import * as _ from "lodash";
 import BaseMetadataRetriever from "./baseMetadataRetriever";
 import { TabDefinition } from "../schema";
+import MetadataFiles from "../metadataFiles";
 
 const QUERY =
   "SELECT Id,  Name, SobjectName, DurableId, IsCustom, Label FROM TabDefinition ";
@@ -43,7 +44,7 @@ export default class TabDefinitionRetriever extends BaseMetadataRetriever<
     if (!_.isNil(METADATA_INFO.CustomTab.components)) {
       found = METADATA_INFO.CustomTab.components.includes(tab);
     }
-    if (!found) {
+    if (!found && !MetadataFiles.sourceOnly) {
       //not found, check on the org
       let tabs = await this.getTabs();
       let foundTab = tabs.find(t => {

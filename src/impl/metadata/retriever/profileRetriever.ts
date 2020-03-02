@@ -2,7 +2,7 @@ import Profile, {
   ProfileObjectPermissions,
   ProfileUserPermission
 } from "../schema";
-import MetadataFiles from "../../../shared/metadataFiles";
+import MetadataFiles from "../metadataFiles";
 import { Connection, Org } from "@salesforce/core";
 import { MetadataInfo } from "jsforce";
 import UserPermissionBuilder from "../builder/userPermissionBuilder";
@@ -10,11 +10,9 @@ import UserPermissionBuilder from "../builder/userPermissionBuilder";
 import * as fs from "fs";
 import xml2js = require("xml2js");
 import { ProfileTooling } from "../schema";
-
-import { SfPowerKit } from "../../../sfpowerkit";
 import BaseMetadataRetriever from "./baseMetadataRetriever";
 import EntityDefinitionRetriever from "./entityDefinitionRetriever";
-import _ from "lodash";
+import * as _ from "lodash";
 
 const unsuportedObjects = ["PersonAccount"];
 /**
@@ -28,16 +26,6 @@ const userLicenceMap = [
     unsupportedPermissions: ["PasswordNeverExpires"]
   }
 ];
-
-const nonArayProperties = [
-  "custom",
-  "description",
-  "fullName",
-  "userLicense",
-  "$"
-];
-
-const PROFILE_NAMESPACE = "http://soap.sforce.com/2006/04/metadata";
 
 const QUERY = "SELECT Id, Name, UserType, Description From Profile";
 export default class ProfileRetriever extends BaseMetadataRetriever<
@@ -63,7 +51,9 @@ export default class ProfileRetriever extends BaseMetadataRetriever<
   public constructor(public org: Org, private debugFlag?: boolean) {
     super(org);
     super.setQuery(QUERY);
-    this.conn = this.org.getConnection();
+    if (this.org !== undefined) {
+      this.conn = this.org.getConnection();
+    }
   }
 
   public async loadSupportedPermissions() {
@@ -157,6 +147,9 @@ export default class ProfileRetriever extends BaseMetadataRetriever<
         };
         if (profileObj.userPermissions === undefined) {
           profileObj.userPermissions = new Array();
+        }
+        if (!Array.isArray(profileObj.userPermissions)) {
+          profileObj.userPermissions = [profileObj.userPermissions];
         }
         profileObj.userPermissions.push(newPermission);
       }
@@ -377,55 +370,6 @@ export default class ProfileRetriever extends BaseMetadataRetriever<
     return [];
   }
 
-  public static toProfile(profileObj: any): Profile {
-    var convertedObject: any = {};
-    for (var key in profileObj) {
-      if (Array.isArray(profileObj[key])) {
-        //All top element must be arays exept non arrayProperties
-        if (nonArayProperties.includes(key)) {
-          convertedObject[key] =
-            profileObj[key][0] === "true"
-              ? true
-              : profileObj[key][0] === "false"
-              ? false
-              : profileObj[key][0];
-        } else {
-          var data = [];
-          for (var i = 0; i < profileObj[key].length; i++) {
-            var element = ProfileRetriever.removeArrayNatureOnValue(
-              profileObj[key][i]
-            );
-            if (element !== "") {
-              data.push(element);
-            }
-          }
-          convertedObject[key] = data;
-        }
-      } else if (nonArayProperties.includes(key)) {
-        convertedObject[key] = profileObj[key];
-      }
-    }
-    return convertedObject as Profile;
-  }
-
-  public static removeArrayNatureOnValue(obj: any): any {
-    var toReturn = {};
-    for (var key in obj) {
-      if (Array.isArray(obj[key]) && obj[key].length > 0) {
-        //All top element must be arays exept non arrayProperties
-        toReturn[key] =
-          obj[key][0] === "true"
-            ? true
-            : obj[key][0] === "false"
-            ? false
-            : obj[key][0];
-      } else {
-        toReturn[key] = obj[key];
-      }
-    }
-    return toReturn;
-  }
-
   /**
    * Return All profile object from the connected Org
    */
@@ -444,27 +388,5 @@ export default class ProfileRetriever extends BaseMetadataRetriever<
       return profiles[0];
     }
     return undefined;
-  }
-
-  public async writeProfile(profileObj: Profile, filePath: string) {
-    //Delete eampty arrays
-    for (var key in profileObj) {
-      if (Array.isArray(profileObj[key])) {
-        //All top element must be arays exept non arrayProperties
-        if (!nonArayProperties.includes(key) && profileObj[key].length === 0) {
-          delete profileObj[key];
-        }
-      }
-    }
-    if (profileObj.fullName !== undefined) {
-      var builder = new xml2js.Builder({ rootName: "Profile" });
-      profileObj["$"] = {
-        xmlns: PROFILE_NAMESPACE
-      };
-      var xml = builder.buildObject(profileObj);
-      fs.writeFileSync(filePath, xml);
-    } else {
-      SfPowerKit.ux.log("No ful name on profile component");
-    }
   }
 }
